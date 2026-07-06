@@ -96,15 +96,27 @@ def is_allowed(url: str) -> bool:
 
 def format_selector(quality: str) -> str:
     """Monta a string de seleção de formato do yt-dlp de acordo com a
-    qualidade escolhida no front-end."""
+    qualidade escolhida no front-end.
+
+    Importante (corrigido em 2026-07-06): a versão antiga terminava a cadeia
+    de fallback em "/best" sem NENHUMA restrição de altura. Em plataformas
+    onde os formatos não batem exatamente com "ext=mp4"/"ext=m4a" (comum em
+    TikTok/Instagram/Kwai, que nem sempre expõem os formatos do mesmo jeito
+    que o YouTube), o yt-dlp caía nesse fallback cego e baixava a "melhor"
+    qualidade disponível — ignorando silenciosamente a qualidade escolhida
+    pelo usuário. Agora o teto de altura é respeitado em toda a cadeia
+    (exceto na opção "max", que existe justamente para não ter teto).
+    """
     if quality == "mp3":
         return "bestaudio/best"
+    if quality == "max":
+        # Qualidade máxima: sem limite de altura, baixa a maior resolução
+        # que o vídeo original tiver disponível (pode passar de 1080p em
+        # uploads feitos em 4K/8K).
+        return "bestvideo+bestaudio/best"
     height_map = {"1080p": 1080, "720p": 720, "480p": 480}
     h = height_map.get(quality, 1080)
-    return (
-        f"bestvideo[ext=mp4][height<={h}]+bestaudio[ext=m4a]/"
-        f"best[ext=mp4][height<={h}]/best[height<={h}]/best"
-    )
+    return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]"
 
 
 def safe_filename(name: str, fallback: str = "video") -> str:
