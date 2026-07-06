@@ -115,7 +115,7 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     return name[:80] or fallback
 
 
-def build_download_title(info: dict, platform: str) -> str:
+def build_download_title(info: dict, platform: str, url: str = "") -> str:
     """Monta o nome do arquivo que o usuário vai ver ao salvar.
 
     - YouTube: usa o título do vídeo (já é descritivo).
@@ -126,13 +126,22 @@ def build_download_title(info: dict, platform: str) -> str:
     if platform == "youtube":
         return info.get("title") or "video"
 
-    uploader = (
-        info.get("uploader_id")
-        or info.get("channel_id")
-        or info.get("uploader")
-        or info.get("channel")
-        or ""
-    ).strip()
+    # O @usuario direto na URL é mais confiável do que os campos do yt-dlp:
+    # em TikTok, por exemplo, "uploader_id" costuma vir como o ID numérico
+    # interno da conta, não o @handle visível (que é o que o usuário quer).
+    # TikTok e Kwai usam o formato .../@usuario/... na URL.
+    handle_match = re.search(r"/@([^/?#]+)", url)
+    uploader = handle_match.group(1) if handle_match else ""
+
+    if not uploader:
+        uploader = (
+            info.get("uploader")
+            or info.get("channel")
+            or info.get("uploader_id")
+            or info.get("channel_id")
+            or ""
+        )
+    uploader = uploader.strip()
     if uploader and not uploader.startswith("@"):
         uploader = "@" + uploader.lstrip("@")
 
@@ -249,7 +258,7 @@ def download():
         return jsonify(error="O arquivo baixado não foi encontrado."), 500
 
     platform = detect_platform(url)
-    download_name = safe_filename(build_download_title(info, platform))
+    download_name = safe_filename(build_download_title(info, platform, url))
     ext = os.path.splitext(filename)[1]
 
     response = send_file(
