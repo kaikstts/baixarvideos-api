@@ -145,22 +145,28 @@ def base_ydl_opts() -> dict:
     que o YouTube costuma aplicar a IPs de servidores/datacenter (comum em
     hosts como o Render): "Sign in to confirm you're not a bot".
 
-    1) Tenta usar cookies de uma conta real (se o arquivo existir) — é a
-       única forma hoje reconhecida pela própria equipe do yt-dlp de driblar
-       esse bloqueio de forma consistente para vídeos comuns.
-    2) Também força os clients 'android'/'ios' do YouTube como fallback
-       (ajuda em alguns casos mesmo sem cookies). Não afeta
-       TikTok/Instagram/Kwai (a opção é ignorada por eles).
+    Tenta usar cookies de uma conta real (se o arquivo existir) — é a única
+    forma hoje reconhecida pela própria equipe do yt-dlp de driblar esse
+    bloqueio de forma consistente para vídeos comuns.
+
+    Importante: quando há cookies, NÃO forçamos os clients 'android'/'ios'
+    junto com 'web'. Testamos e essa combinação quebrava a seleção de
+    formato ("Requested format is not available") — os clients android/ios
+    não usam os cookies da mesma forma que o 'web' e misturar as listas de
+    formato dos três causava conflito. Só forçamos android/ios como
+    fallback SEM cookies (não afeta TikTok/Instagram/Kwai, que ignoram essa
+    opção).
     """
-    opts = {
-        "extractor_args": {
+    has_cookies = os.path.isfile(_WRITABLE_COOKIES_FILE)
+    opts = {}
+    if has_cookies:
+        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
+    else:
+        opts["extractor_args"] = {
             "youtube": {
                 "player_client": ["android", "ios", "web"],
             }
-        },
-    }
-    if os.path.isfile(_WRITABLE_COOKIES_FILE):
-        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
+        }
     return opts
 
 
