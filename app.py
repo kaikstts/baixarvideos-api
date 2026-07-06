@@ -121,7 +121,23 @@ def safe_filename(name: str, fallback: str = "video") -> str:
 # Sem esse arquivo, o YouTube passa a exigir "confirme que você não é um
 # robô" para a maioria dos vídeos comuns (não afeta vídeos virais/oficiais
 # muito cacheados, nem TikTok/Instagram/Kwai).
-YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "/etc/secrets/youtube_cookies.txt")
+_RAW_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "/etc/secrets/youtube_cookies.txt")
+# Secret Files do Render são somente leitura, mas o yt-dlp tenta reescrever
+# o arquivo de cookies depois de usá-lo (para salvar tokens renovados, tipo
+# SIDCC). Por isso copiamos para um local gravável (/tmp) uma vez, quando o
+# processo sobe, e usamos essa cópia no dia a dia.
+_WRITABLE_COOKIES_FILE = "/tmp/youtube_cookies_writable.txt"
+
+
+def _prepare_writable_cookies_file() -> None:
+    try:
+        if os.path.isfile(_RAW_COOKIES_FILE) and not os.path.isfile(_WRITABLE_COOKIES_FILE):
+            shutil.copyfile(_RAW_COOKIES_FILE, _WRITABLE_COOKIES_FILE)
+    except OSError:
+        pass
+
+
+_prepare_writable_cookies_file()
 
 
 def base_ydl_opts() -> dict:
@@ -143,8 +159,8 @@ def base_ydl_opts() -> dict:
             }
         },
     }
-    if os.path.isfile(YTDLP_COOKIES_FILE):
-        opts["cookiefile"] = YTDLP_COOKIES_FILE
+    if os.path.isfile(_WRITABLE_COOKIES_FILE):
+        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
     return opts
 
 
