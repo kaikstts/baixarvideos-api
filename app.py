@@ -47,11 +47,18 @@ app = Flask(__name__)
 # Libera chamadas vindas do front-end estático hospedado em baixarvideos.site
 # (necessário porque o front (Hostinger) e o back (Render/Railway/etc.) ficam
 # em domínios diferentes).
-CORS(app, resources={r"/api/*": {"origins": [
-    "https://baixarvideos.site",
-    "https://www.baixarvideos.site",
-    "http://localhost:5000",
-]}})
+CORS(app, resources={r"/api/*": {
+    "origins": [
+        "https://baixarvideos.site",
+        "https://www.baixarvideos.site",
+        "http://localhost:5000",
+    ],
+    # Sem isso, o navegador esconde o header Content-Disposition do
+    # JavaScript em respostas cross-origin (front em baixarvideos.site,
+    # back em onrender.com são origens diferentes) — o front acaba sem
+    # saber o nome real do arquivo e usa um nome genérico ("video.mp4").
+    "expose_headers": ["Content-Disposition"],
+}})
 
 # ----------------------------------------------------------------------
 # Configuração de plataformas suportadas
@@ -106,6 +113,34 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     name = re.sub(r"[^\w\s.-]", "", name).strip()
     name = re.sub(r"\s+", "_", name)
     return name[:80] or fallback
+
+
+def build_download_title(info: dict, platform: str) -> str:
+    """Monta o nome do arquivo que o usuário vai ver ao salvar.
+
+    - YouTube: usa o título do vídeo (já é descritivo).
+    - TikTok / Instagram / Kwai: o "título" que o yt-dlp extrai costuma ser
+      vago, cortado ou até ausente. Para facilitar localizar o vídeo depois,
+      usa "@usuario - legenda".
+    """
+    if platform == "youtube":
+        return info.get("title") or "video"
+
+    uploader = (
+        info.get("uploader_id")
+        or info.get("channel_id")
+        or info.get("uploader")
+        or info.get("channel")
+        or ""
+    ).strip()
+    if uploader and not uploader.startswith("@"):
+        uploader = "@" + uploader.lstrip("@")
+
+    caption = (info.get("title") or info.get("description") or "").strip()
+    caption = caption.splitlines()[0] if caption else ""  # só a 1ª linha
+
+    parts = [p for p in (uploader, caption) if p]
+    return " - ".join(parts) if parts else (info.get("title") or "video")
 
 
 # ----------------------------------------------------------------------
@@ -213,7 +248,8 @@ def download():
         shutil.rmtree(tmpdir, ignore_errors=True)
         return jsonify(error="O arquivo baixado não foi encontrado."), 500
 
-    download_name = safe_filename(os.path.splitext(os.path.basename(filename))[0])
+    platform = detect_platform(url)
+    download_name = safe_filename(build_download_title(info, platform))
     ext = os.path.splitext(filename)[1]
 
     response = send_file(
@@ -582,34 +618,26 @@ INDEX_HTML = r"""<!DOCTYPE html>
     });
   });
 
-  finalDownloadBtn.addEventListener('click', async ()=>{
+  finalDownloadBtn.addEventListener('click', ()=>{
     if(!currentUrl) return;
+    // Navegação direta (sem fetch+blob): o navegador lida nativamente com
+    // o header Content-Disposition (nome do arquivo correto) e o download
+    // fica muito mais confiável em celular (iOS/Android), já que não
+    // precisa carregar o vídeo inteiro na memória antes de salvar.
+    const dlUrl = '/api/download?url=' + encodeURIComponent(currentUrl) + '&quality=' + encodeURIComponent(selectedQuality);
     const originalText = finalDownloadBtn.textContent;
     finalDownloadBtn.disabled = true;
-    finalDownloadBtn.textContent = 'Baixando...';
-    try{
-      const dlUrl = '/api/download?url=' + encodeURIComponent(currentUrl) + '&quality=' + encodeURIComponent(selectedQuality);
-      const resp = await fetch(dlUrl);
-      if(!resp.ok){
-        const errData = await resp.json().catch(()=>({error:'Erro ao baixar o vídeo.'}));
-        throw new Error(errData.error || 'Erro ao baixar o vídeo.');
-      }
-      const disposition = resp.headers.get('Content-Disposition') || '';
-      let filename = 'video';
-      const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)"?/i);
-      if(match) filename = decodeURIComponent(match[1]);
-      const blob = await resp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(blobUrl);
-    }catch(e){
-      alert(e.message);
-    }finally{
+    finalDownloadBtn.textContent = 'Preparando download...';
+    const a = document.createElement('a');
+    a.href = dlUrl;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>{
       finalDownloadBtn.disabled = false;
       finalDownloadBtn.textContent = originalText;
-    }
+    }, 4000);
   });
 
   document.querySelectorAll('.faq-item').forEach(item=>{
