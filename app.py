@@ -115,6 +115,22 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     return name[:80] or fallback
 
 
+def base_ydl_opts() -> dict:
+    """Opções compartilhadas com o yt-dlp para driblar o bloqueio anti-bot
+    que o YouTube costuma aplicar a IPs de servidores/datacenter (comum em
+    hosts como o Render): "Sign in to confirm you're not a bot". Forçamos o
+    yt-dlp a extrair usando os clients 'android'/'ios' do YouTube (que não
+    passam por essa verificação), caindo para o 'web' só como último
+    recurso. Não afeta TikTok/Instagram/Kwai (a opção é ignorada por eles)."""
+    return {
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "web"],
+            }
+        },
+    }
+
+
 def build_download_title(info: dict, platform: str, url: str = "") -> str:
     """Monta o nome do arquivo que o usuário vai ver ao salvar.
 
@@ -174,6 +190,7 @@ def analyze():
         "skip_download": True,
         "noplaylist": True,
         "socket_timeout": 15,
+        **base_ydl_opts(),
     }
 
     try:
@@ -230,6 +247,7 @@ def download():
         "outtmpl": os.path.join(tmpdir, "%(title).80s.%(ext)s"),
         "format": format_selector(quality),
         "socket_timeout": 30,
+        **base_ydl_opts(),
     }
 
     if quality == "mp3":
