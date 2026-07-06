@@ -115,20 +115,37 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     return name[:80] or fallback
 
 
+# Caminho de um arquivo de cookies (formato Netscape) exportado de uma conta
+# real do YouTube logada. NUNCA fica no repositório (que é público) — é
+# configurado como "Secret File" direto no painel do Render, fora do Git.
+# Sem esse arquivo, o YouTube passa a exigir "confirme que você não é um
+# robô" para a maioria dos vídeos comuns (não afeta vídeos virais/oficiais
+# muito cacheados, nem TikTok/Instagram/Kwai).
+YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "/etc/secrets/youtube_cookies.txt")
+
+
 def base_ydl_opts() -> dict:
     """Opções compartilhadas com o yt-dlp para driblar o bloqueio anti-bot
     que o YouTube costuma aplicar a IPs de servidores/datacenter (comum em
-    hosts como o Render): "Sign in to confirm you're not a bot". Forçamos o
-    yt-dlp a extrair usando os clients 'android'/'ios' do YouTube (que não
-    passam por essa verificação), caindo para o 'web' só como último
-    recurso. Não afeta TikTok/Instagram/Kwai (a opção é ignorada por eles)."""
-    return {
+    hosts como o Render): "Sign in to confirm you're not a bot".
+
+    1) Tenta usar cookies de uma conta real (se o arquivo existir) — é a
+       única forma hoje reconhecida pela própria equipe do yt-dlp de driblar
+       esse bloqueio de forma consistente para vídeos comuns.
+    2) Também força os clients 'android'/'ios' do YouTube como fallback
+       (ajuda em alguns casos mesmo sem cookies). Não afeta
+       TikTok/Instagram/Kwai (a opção é ignorada por eles).
+    """
+    opts = {
         "extractor_args": {
             "youtube": {
                 "player_client": ["android", "ios", "web"],
             }
         },
     }
+    if os.path.isfile(YTDLP_COOKIES_FILE):
+        opts["cookiefile"] = YTDLP_COOKIES_FILE
+    return opts
 
 
 def build_download_title(info: dict, platform: str, url: str = "") -> str:
