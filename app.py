@@ -140,14 +140,35 @@ def _prepare_writable_cookies_file() -> None:
 _prepare_writable_cookies_file()
 
 
-def base_ydl_opts() -> dict:
-    """Opções compartilhadas com o yt-dlp para driblar o bloqueio anti-bot
-    que o YouTube costuma aplicar a IPs de servidores/datacenter (comum em
-    hosts como o Render): "Sign in to confirm you're not a bot".
+# O YouTube passou a exigir a resolução de um "desafio JavaScript" (n
+# challenge, ligado a PO Token/SABR streaming) para liberar os formatos de
+# vídeo de verdade — sem isso, o yt-dlp só consegue extrair imagens
+# (storyboard/thumbnail), mesmo com cookies válidos. A própria equipe do
+# yt-dlp recomenda instalar um runtime de JavaScript (Deno) ao lado dele.
+# No Render, o Build Command instala o Deno dentro do próprio diretório do
+# projeto (pasta ".deno", ver README/CLAUDE.md), então localizamos o
+# binário de forma relativa a este arquivo — funciona tanto no Render
+# quanto localmente (se o dev tiver instalado o Deno do mesmo jeito).
+_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DENO_PATH = os.path.join(_PROJECT_DIR, ".deno", "bin", "deno")
+if not os.path.isfile(_DENO_PATH):
+    # Fallback: Deno instalado no PATH padrão do sistema (ex.: ambiente
+    # local do desenvolvedor, ou outra forma de instalação no host).
+    _DENO_PATH = shutil.which("deno") or ""
 
-    Tenta usar cookies de uma conta real (se o arquivo existir) — é a única
-    forma hoje reconhecida pela própria equipe do yt-dlp de driblar esse
-    bloqueio de forma consistente para vídeos comuns.
+
+def base_ydl_opts() -> dict:
+    """Opções compartilhadas com o yt-dlp para driblar os bloqueios que o
+    YouTube aplica a servidores/datacenter (comum em hosts como o Render):
+
+    1) "Sign in to confirm you're not a bot" — resolvido usando cookies de
+       uma conta real (se o arquivo existir). É a única forma hoje
+       reconhecida pela própria equipe do yt-dlp de driblar esse bloqueio
+       de forma consistente para vídeos comuns.
+    2) "Requested format is not available" (mesmo com cookies) — causado
+       pela falta de um runtime de JavaScript para resolver o desafio
+       "n challenge" do YouTube. Resolvido apontando o yt-dlp para o
+       binário do Deno (se instalado).
 
     Importante: quando há cookies, NÃO forçamos os clients 'android'/'ios'
     junto com 'web'. Testamos e essa combinação quebrava a seleção de
@@ -167,6 +188,8 @@ def base_ydl_opts() -> dict:
                 "player_client": ["android", "ios", "web"],
             }
         }
+    if _DENO_PATH:
+        opts["js_runtimes"] = {"deno": {"path": _DENO_PATH}}
     return opts
 
 
