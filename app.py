@@ -304,10 +304,34 @@ def build_download_title(info: dict, platform: str, url: str = "") -> str:
 # Rotas da API
 # ----------------------------------------------------------------------
 
+class _DebugLogger:
+    """Logger temporário de diagnóstico (2026-07-07): coleta as linhas de
+    debug do yt-dlp (incluindo a linha 'PO Token Providers: ...') para
+    confirmar se o plugin bgutil está sendo carregado e consultado. Só é
+    exposto na resposta de erro quando ?debug=1 é passado — remover depois
+    de confirmar a causa raiz do bloqueio do YouTube."""
+
+    def __init__(self):
+        self.lines = []
+
+    def debug(self, msg):
+        self.lines.append(str(msg))
+
+    def info(self, msg):
+        self.lines.append(str(msg))
+
+    def warning(self, msg):
+        self.lines.append("WARNING: " + str(msg))
+
+    def error(self, msg):
+        self.lines.append("ERROR: " + str(msg))
+
+
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
     data = request.get_json(force=True, silent=True) or {}
     url = (data.get("url") or "").strip()
+    debug = request.args.get("debug") == "1"
 
     if not url:
         return jsonify(error="Cole um link antes de continuar."), 400
@@ -316,6 +340,7 @@ def analyze():
             error="Link não suportado. Use um link do YouTube, TikTok, Instagram ou Kwai."
         ), 400
 
+    logger = _DebugLogger()
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -324,15 +349,21 @@ def analyze():
         "socket_timeout": 15,
         **base_ydl_opts(),
     }
+    if debug:
+        ydl_opts["verbose"] = True
+        ydl_opts["logger"] = logger
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
     except Exception as exc:
-        return jsonify(
-            error="Não foi possível processar este link. Verifique se o vídeo é público. "
-                  f"Detalhe técnico: {short_error(exc)}"
-        ), 502
+        resp = {
+            "error": "Não foi possível processar este link. Verifique se o vídeo é público. "
+                     f"Detalhe técnico: {short_error(exc)}"
+        }
+        if debug:
+            resp["debug_log"] = logger.lines[-60:]
+        return jsonify(**resp), 502
 
     return jsonify(
         title=info.get("title") or "Vídeo",
