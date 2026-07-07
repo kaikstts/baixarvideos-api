@@ -255,12 +255,23 @@ def base_ydl_opts() -> dict:
     if has_cookies:
         opts["cookiefile"] = _WRITABLE_COOKIES_FILE
 
+    # IMPORTANTE (2026-07-07, segunda descoberta): forçar player_client
+    # (mweb/android/ios) JUNTO com cookies reintroduz o mesmo problema já
+    # visto antes (misturar esses clients com cookies quebra a
+    # autenticação) — só que dessa vez o erro veio como "Sign in to
+    # confirm you're not a bot" em vez de "Requested format is not
+    # available". Confirmado ao vivo: com cookies frescos (reexportados
+    # nesta sessão) + esse override de client, o vídeo 4Sffn-6U0hY voltou a
+    # falhar com bot-check. A regra que funcionou antes (Passo 3, sessão
+    # anterior) era: com cookies, deixar o yt-dlp escolher o client padrão
+    # (não força nada); sem cookies, força android/ios/web. O PO Token
+    # Provider continua registrado sempre (não atrapalha), só o client
+    # forçado para mweb é que fica reservado para quando NÃO há cookies.
     extractor_args = {}
     if _POT_PROVIDER_BASE_URL:
         extractor_args["youtubepot-bgutilhttp"] = {"base_url": [_POT_PROVIDER_BASE_URL]}
-        extractor_args["youtube"] = {"player_client": ["mweb", "web", "android", "ios"]}
-    elif not has_cookies:
-        extractor_args["youtube"] = {"player_client": ["android", "ios", "web"]}
+    if not has_cookies:
+        extractor_args["youtube"] = {"player_client": ["mweb", "android", "ios", "web"]}
     if extractor_args:
         opts["extractor_args"] = extractor_args
 
