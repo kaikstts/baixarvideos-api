@@ -234,6 +234,14 @@ def base_ydl_opts() -> dict:
     formato dos três causava conflito. Só forçamos android/ios como
     fallback SEM cookies (não afeta TikTok/Instagram/Kwai, que ignoram essa
     opção).
+
+    Sobre o client 'mweb': o guia oficial de PO Token do yt-dlp recomenda
+    usar especificamente o client 'mweb' com o PO Token Provider (é o
+    combo testado/documentado pela equipe do yt-dlp). Por isso, quando o
+    provider está configurado e não há cookies, colocamos 'mweb' primeiro
+    na lista de clients (com web/android/ios como fallback) — antes dessa
+    correção, forçávamos só android/ios/web, que não é o alvo do PO Token,
+    e por isso o provider nunca era realmente consultado.
     """
     has_cookies = os.path.isfile(_WRITABLE_COOKIES_FILE)
     opts = {}
@@ -241,10 +249,12 @@ def base_ydl_opts() -> dict:
         opts["cookiefile"] = _WRITABLE_COOKIES_FILE
 
     extractor_args = {}
-    if not has_cookies:
-        extractor_args["youtube"] = {"player_client": ["android", "ios", "web"]}
     if _POT_PROVIDER_BASE_URL:
         extractor_args["youtubepot-bgutilhttp"] = {"base_url": [_POT_PROVIDER_BASE_URL]}
+        if not has_cookies:
+            extractor_args["youtube"] = {"player_client": ["mweb", "web", "android", "ios"]}
+    elif not has_cookies:
+        extractor_args["youtube"] = {"player_client": ["android", "ios", "web"]}
     if extractor_args:
         opts["extractor_args"] = extractor_args
 
