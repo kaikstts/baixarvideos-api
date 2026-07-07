@@ -216,44 +216,42 @@ def base_ydl_opts() -> dict:
     """Opções compartilhadas com o yt-dlp para driblar os bloqueios que o
     YouTube aplica a servidores/datacenter (comum em hosts como o Render):
 
-    1) "Sign in to confirm you're not a bot" — hoje resolvido de duas formas
-       complementares: (a) o PO Token Provider (serviço bgutil separado, ver
-       acima), que é a solução durável e não depende de cookies; (b) cookies
-       de uma conta real, mantidos como camada extra (útil para vídeos com
-       restrição de idade), mas que exigem reexportação periódica quando
-       expiram — se faltarem, o site continua funcionando via PO Token.
+    1) "Sign in to confirm you're not a bot" — resolvido pelo PO Token
+       Provider (serviço bgutil separado, ver acima): um token
+       criptográfico por vídeo que atesta ao YouTube que a requisição vem
+       de um cliente legítimo, sem depender de cookies de conta.
     2) "Requested format is not available" (mesmo com cookies) — causado
        pela falta de um runtime de JavaScript para resolver o desafio
        "n challenge" do YouTube. Resolvido apontando o yt-dlp para o
        binário do Deno (se instalado).
 
-    Importante: quando há cookies, NÃO forçamos os clients 'android'/'ios'
-    junto com 'web'. Testamos e essa combinação quebrava a seleção de
-    formato ("Requested format is not available") — os clients android/ios
-    não usam os cookies da mesma forma que o 'web' e misturar as listas de
-    formato dos três causava conflito. Só forçamos android/ios como
-    fallback SEM cookies (não afeta TikTok/Instagram/Kwai, que ignoram essa
-    opção).
-
-    Sobre o client 'mweb': o guia oficial de PO Token do yt-dlp recomenda
-    usar especificamente o client 'mweb' com o PO Token Provider (é o
-    combo testado/documentado pela equipe do yt-dlp). Por isso, quando o
-    provider está configurado e não há cookies, colocamos 'mweb' primeiro
-    na lista de clients (com web/android/ios como fallback) — antes dessa
-    correção, forçávamos só android/ios/web, que não é o alvo do PO Token,
-    e por isso o provider nunca era realmente consultado.
+    Diagnóstico de 2026-07-07 (logs verbosos do yt-dlp em produção):
+    confirmado que os cookies salvos como Secret File no Render EXPIRARAM
+    de verdade — o yt-dlp reportou explicitamente "The provided YouTube
+    account cookies are no longer valid. They have likely been rotated in
+    the browser as a security measure." Pior: passar esse cookiefile
+    inválido não é neutro, é ATIVAMENTE PREJUDICIAL — faz o YouTube tratar
+    a requisição como uma sessão logada só que inválida, retornando
+    "LOGIN_REQUIRED" nos clients padrão (tv_downgraded, web_safari), em vez
+    de simplesmente deixar o PO Token autenticar como visitante anônimo.
+    Por isso, agora que o PO Token Provider está no ar, o cookiefile deixou
+    de ser usado por completo — o client 'mweb' (o único documentado pela
+    equipe do yt-dlp como alvo oficial do PO Token) é sempre priorizado
+    quando o provider está configurado, independente de existir ou não um
+    arquivo de cookies salvo. Isso também é o que resolve o pedido do
+    usuário de não depender mais de reexportar cookies periodicamente.
     """
-    has_cookies = os.path.isfile(_WRITABLE_COOKIES_FILE)
     opts = {}
-    if has_cookies:
-        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
 
     extractor_args = {}
     if _POT_PROVIDER_BASE_URL:
         extractor_args["youtubepot-bgutilhttp"] = {"base_url": [_POT_PROVIDER_BASE_URL]}
-        if not has_cookies:
-            extractor_args["youtube"] = {"player_client": ["mweb", "web", "android", "ios"]}
-    elif not has_cookies:
+        extractor_args["youtube"] = {"player_client": ["mweb", "web", "android", "ios"]}
+    elif os.path.isfile(_WRITABLE_COOKIES_FILE):
+        # Fallback antigo, só usado se o PO Token Provider não estiver
+        # configurado (ex.: variável de ambiente removida de propósito).
+        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
+    else:
         extractor_args["youtube"] = {"player_client": ["android", "ios", "web"]}
     if extractor_args:
         opts["extractor_args"] = extractor_args
