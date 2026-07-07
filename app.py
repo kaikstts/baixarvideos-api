@@ -197,15 +197,31 @@ if not os.path.isfile(_DENO_PATH):
     # local do desenvolvedor, ou outra forma de instalação no host).
     _DENO_PATH = shutil.which("deno") or ""
 
+# PO Token Provider (bgutil-ytdlp-pot-provider) — solução mais durável para o
+# bloqueio "Sign in to confirm you're not a bot" do YouTube (2026-07-07).
+# Antes, a única defesa era um arquivo de cookies de uma conta real, que
+# expira periodicamente e precisa ser reexportado à mão. O PO Token resolve
+# isso de outro jeito: um serviço à parte (rodando a imagem Docker oficial
+# brainicism/bgutil-ytdlp-pot-provider) gera, por vídeo, um token
+# criptográfico que atesta ao YouTube que a requisição vem de um cliente
+# legítimo — sem depender de sessão logada. Implantado como um segundo
+# serviço no Render ("baixarvideos-pot-provider", Private Service, plano
+# Starter), acessível só pela rede interna do Render nesse endereço:
+_POT_PROVIDER_BASE_URL = os.environ.get(
+    "POT_PROVIDER_BASE_URL", "http://baixarvideos-pot-provider:4416"
+)
+
 
 def base_ydl_opts() -> dict:
     """Opções compartilhadas com o yt-dlp para driblar os bloqueios que o
     YouTube aplica a servidores/datacenter (comum em hosts como o Render):
 
-    1) "Sign in to confirm you're not a bot" — resolvido usando cookies de
-       uma conta real (se o arquivo existir). É a única forma hoje
-       reconhecida pela própria equipe do yt-dlp de driblar esse bloqueio
-       de forma consistente para vídeos comuns.
+    1) "Sign in to confirm you're not a bot" — hoje resolvido de duas formas
+       complementares: (a) o PO Token Provider (serviço bgutil separado, ver
+       acima), que é a solução durável e não depende de cookies; (b) cookies
+       de uma conta real, mantidos como camada extra (útil para vídeos com
+       restrição de idade), mas que exigem reexportação periódica quando
+       expiram — se faltarem, o site continua funcionando via PO Token.
     2) "Requested format is not available" (mesmo com cookies) — causado
        pela falta de um runtime de JavaScript para resolver o desafio
        "n challenge" do YouTube. Resolvido apontando o yt-dlp para o
@@ -223,12 +239,15 @@ def base_ydl_opts() -> dict:
     opts = {}
     if has_cookies:
         opts["cookiefile"] = _WRITABLE_COOKIES_FILE
-    else:
-        opts["extractor_args"] = {
-            "youtube": {
-                "player_client": ["android", "ios", "web"],
-            }
-        }
+
+    extractor_args = {}
+    if not has_cookies:
+        extractor_args["youtube"] = {"player_client": ["android", "ios", "web"]}
+    if _POT_PROVIDER_BASE_URL:
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [_POT_PROVIDER_BASE_URL]}
+    if extractor_args:
+        opts["extractor_args"] = extractor_args
+
     if _DENO_PATH:
         opts["js_runtimes"] = {"deno": {"path": _DENO_PATH}}
     return opts
