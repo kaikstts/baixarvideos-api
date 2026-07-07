@@ -98,14 +98,33 @@ def format_selector(quality: str) -> str:
     """Monta a string de seleção de formato do yt-dlp de acordo com a
     qualidade escolhida no front-end.
 
-    Importante (corrigido em 2026-07-06): a versão antiga terminava a cadeia
-    de fallback em "/best" sem NENHUMA restrição de altura. Em plataformas
-    onde os formatos não batem exatamente com "ext=mp4"/"ext=m4a" (comum em
-    TikTok/Instagram/Kwai, que nem sempre expõem os formatos do mesmo jeito
-    que o YouTube), o yt-dlp caía nesse fallback cego e baixava a "melhor"
-    qualidade disponível — ignorando silenciosamente a qualidade escolhida
-    pelo usuário. Agora o teto de altura é respeitado em toda a cadeia
-    (exceto na opção "max", que existe justamente para não ter teto).
+    Histórico:
+    - Versão original: terminava a cadeia de fallback em "/best" sem
+      NENHUMA restrição de altura E com filtros extras de "ext=mp4"/
+      "ext=m4a". Em plataformas onde os formatos não batem exatamente com
+      esses ext (comum em TikTok/Instagram/Kwai), o yt-dlp caía nesse
+      fallback cego e baixava a "melhor" qualidade disponível — ignorando
+      silenciosamente a qualidade escolhida pelo usuário.
+    - Correção de 2026-07-06 (parcial): removidos os filtros de "ext" e o
+      fallback final sem teto de altura, para respeitar de fato a
+      qualidade escolhida. Isso resolveu o problema acima, mas introduziu
+      um bug novo e mais grave: quando o vídeo simplesmente NÃO tem nenhum
+      formato disponível dentro do teto pedido (comum em duas situações
+      reais, confirmadas em teste): (1) plataformas como o Kwai, que o
+      yt-dlp extrai via extractor "generic" e não expõe metadado de altura
+      nos formatos — QUALQUER filtro de altura falha, inclusive 1080p, que
+      é a qualidade padrão selecionada na tela; (2) vídeos do TikTok/
+      Instagram que só têm UMA renderização nativa (ex.: só 1080p) — pedir
+      720p ou 480p falhava com "Requested format is not available" em vez
+      de simplesmente entregar a única qualidade que existe.
+    - Correção de hoje: mantém o teto de altura como preferência (então a
+      qualidade escolhida continua sendo respeitada sempre que existir uma
+      opção dentro do teto), mas adiciona "/best" como último recurso ao
+      final da cadeia — só é usado quando NENHUMA alternativa anterior tem
+      qualquer formato disponível, então não reintroduz o bug antigo (que
+      era causado pelos filtros de ext, já removidos), apenas evita que o
+      download falhe por completo quando o vídeo não tem opção dentro do
+      teto pedido.
     """
     if quality == "mp3":
         return "bestaudio/best"
@@ -116,7 +135,17 @@ def format_selector(quality: str) -> str:
         return "bestvideo+bestaudio/best"
     height_map = {"1080p": 1080, "720p": 720, "480p": 480}
     h = height_map.get(quality, 1080)
-    return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]"
+    return f"bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
+
+
+def short_error(exc: Exception, limit: int = 220) -> str:
+    """Encurta a mensagem de exceção do yt-dlp antes de mandar para o
+    front-end. Sem isso, alguns erros (principalmente do YouTube) vêm com
+    parágrafos inteiros de texto (dicas, links, avisos), o que aparecia
+    como uma parede de texto ilegível no alert() do navegador."""
+    msg = str(exc).strip()
+    msg = re.sub(r"\s+", " ", msg)
+    return msg[:limit] + ("…" if len(msg) > limit else "")
 
 
 def safe_filename(name: str, fallback: str = "video") -> str:
@@ -273,7 +302,7 @@ def analyze():
     except Exception as exc:
         return jsonify(
             error="Não foi possível processar este link. Verifique se o vídeo é público. "
-                  f"Detalhe técnico: {exc}"
+                  f"Detalhe técnico: {short_error(exc)}"
         ), 502
 
     return jsonify(
@@ -321,6 +350,12 @@ def download():
         "outtmpl": os.path.join(tmpdir, "%(title).80s.%(ext)s"),
         "format": format_selector(quality),
         "socket_timeout": 30,
+        # Resiliência contra falhas de rede passageiras (comum em vídeos
+        # maiores/"qualidade máxima", onde a conexão fica aberta por mais
+        # tempo) — sem isso, um único soquete que falhar no meio do
+        # download derruba o processo inteiro sem tentar de novo.
+        "retries": 3,
+        "fragment_retries": 3,
         **base_ydl_opts(),
     }
 
@@ -342,7 +377,7 @@ def download():
     except Exception as exc:
         shutil.rmtree(tmpdir, ignore_errors=True)
         return jsonify(
-            error=f"Falha ao baixar o vídeo. Detalhe técnico: {exc}"
+            error=f"Falha ao baixar o vídeo. Detalhe técnico: {short_error(exc)}"
         ), 502
 
     if not os.path.exists(filename):
