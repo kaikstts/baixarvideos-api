@@ -214,44 +214,52 @@ _POT_PROVIDER_BASE_URL = os.environ.get(
 
 def base_ydl_opts() -> dict:
     """Opções compartilhadas com o yt-dlp para driblar os bloqueios que o
-    YouTube aplica a servidores/datacenter (comum em hosts como o Render):
+    YouTube aplica a servidores/datacenter (comum em hosts como o Render).
 
-    1) "Sign in to confirm you're not a bot" — resolvido pelo PO Token
-       Provider (serviço bgutil separado, ver acima): um token
-       criptográfico por vídeo que atesta ao YouTube que a requisição vem
-       de um cliente legítimo, sem depender de cookies de conta.
-    2) "Requested format is not available" (mesmo com cookies) — causado
+    Diagnóstico completo de 2026-07-07 (logs verbosos do yt-dlp em
+    produção, com e sem o PO Token Provider):
+
+    1) Os cookies salvos como Secret File no Render EXPIRARAM de verdade —
+       o yt-dlp reportou "The provided YouTube account cookies are no
+       longer valid. They have likely been rotated in the browser as a
+       security measure."
+    2) Instalamos o PO Token Provider (bgutil, serviço separado no Render)
+       e confirmamos que ele está registrado e sendo considerado pelo
+       yt-dlp ("PO Token Providers: bgutil:http-1.3.1 (external)",
+       "Detected experiment to bind GVS PO Token to video ID"). MAS: testei
+       sem cookies (só PO Token + client 'mweb') e o mesmo bloqueio
+       aconteceu de novo — todos os clients (mweb/web/android/ios)
+       retornaram "playability status: LOGIN_REQUIRED". Ou seja, o PO
+       Token sozinho NÃO substitui os cookies para vídeos comuns vindos de
+       um IP de datacenter — ele resolve o desafio "prove que é um cliente
+       de verdade", mas "LOGIN_REQUIRED" é literalmente o YouTube pedindo
+       uma sessão de conta autenticada, que só cookies de conta real
+       fornecem. (Um vídeo extremamente viral/cacheado como o de teste
+       "Rick Astley" continua funcionando mesmo sem cookies — provavelmente
+       servido via CDN/cache que não passa pela checagem ao vivo.)
+    3) Conclusão prática: cookies de conta real continuam sendo
+       NECESSÁRIOS para a maioria dos vídeos (não só um "extra"), então o
+       usuário ainda precisa reexportar cookies frescos quando eles
+       expiram. O PO Token Provider fica mantido mesmo assim, combinado
+       com os cookies quando existem — ajuda a resolver o desafio JS
+       adicional e é a prática recomendada oficialmente pela equipe do
+       yt-dlp, então tende a tornar a combinação mais resiliente a
+       mudanças futuras do YouTube.
+    4) "Requested format is not available" (mesmo com cookies) — causado
        pela falta de um runtime de JavaScript para resolver o desafio
        "n challenge" do YouTube. Resolvido apontando o yt-dlp para o
        binário do Deno (se instalado).
-
-    Diagnóstico de 2026-07-07 (logs verbosos do yt-dlp em produção):
-    confirmado que os cookies salvos como Secret File no Render EXPIRARAM
-    de verdade — o yt-dlp reportou explicitamente "The provided YouTube
-    account cookies are no longer valid. They have likely been rotated in
-    the browser as a security measure." Pior: passar esse cookiefile
-    inválido não é neutro, é ATIVAMENTE PREJUDICIAL — faz o YouTube tratar
-    a requisição como uma sessão logada só que inválida, retornando
-    "LOGIN_REQUIRED" nos clients padrão (tv_downgraded, web_safari), em vez
-    de simplesmente deixar o PO Token autenticar como visitante anônimo.
-    Por isso, agora que o PO Token Provider está no ar, o cookiefile deixou
-    de ser usado por completo — o client 'mweb' (o único documentado pela
-    equipe do yt-dlp como alvo oficial do PO Token) é sempre priorizado
-    quando o provider está configurado, independente de existir ou não um
-    arquivo de cookies salvo. Isso também é o que resolve o pedido do
-    usuário de não depender mais de reexportar cookies periodicamente.
     """
+    has_cookies = os.path.isfile(_WRITABLE_COOKIES_FILE)
     opts = {}
+    if has_cookies:
+        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
 
     extractor_args = {}
     if _POT_PROVIDER_BASE_URL:
         extractor_args["youtubepot-bgutilhttp"] = {"base_url": [_POT_PROVIDER_BASE_URL]}
         extractor_args["youtube"] = {"player_client": ["mweb", "web", "android", "ios"]}
-    elif os.path.isfile(_WRITABLE_COOKIES_FILE):
-        # Fallback antigo, só usado se o PO Token Provider não estiver
-        # configurado (ex.: variável de ambiente removida de propósito).
-        opts["cookiefile"] = _WRITABLE_COOKIES_FILE
-    else:
+    elif not has_cookies:
         extractor_args["youtube"] = {"player_client": ["android", "ios", "web"]}
     if extractor_args:
         opts["extractor_args"] = extractor_args
