@@ -94,6 +94,25 @@ def is_allowed(url: str) -> bool:
     return detect_platform(url) is not None
 
 
+# YouTube temporariamente desativado (2026-07-07): mesmo com cookies
+# genuinamente frescos + client "web" + PO Token corretamente configurados,
+# o YouTube continua bloqueando vídeos comuns com "Sign in to confirm
+# you're not a bot" / LOGIN_REQUIRED (ver histórico completo no CLAUDE.md).
+# O usuário decidiu pausar essa plataforma para não arriscar a conta Google
+# usada nos cookies (uso repetido de cookies de conta real a partir de um
+# IP de datacenter pode levar a sinalização/suspensão da conta pelo
+# YouTube). Este guard barra qualquer chamada ao yt-dlp para YouTube,
+# mesmo que alguém contorne o frontend e chame a API direto.
+YOUTUBE_DISABLED_MESSAGE = (
+    "Download do YouTube está temporariamente indisponível (em breve "
+    "estará de volta). Use TikTok, Instagram ou Kwai por enquanto."
+)
+
+
+def is_youtube_disabled(url: str) -> bool:
+    return detect_platform(url) == "youtube"
+
+
 def format_selector(quality: str) -> str:
     """Monta a string de seleção de formato do yt-dlp de acordo com a
     qualidade escolhida no front-end.
@@ -337,6 +356,8 @@ def analyze():
         return jsonify(
             error="Link não suportado. Use um link do YouTube, TikTok, Instagram ou Kwai."
         ), 400
+    if is_youtube_disabled(url):
+        return jsonify(error=YOUTUBE_DISABLED_MESSAGE), 400
 
     ydl_opts = {
         "quiet": True,
@@ -401,6 +422,8 @@ def download():
 
     if not url or not is_allowed(url):
         return jsonify(error="Link inválido ou plataforma não suportada."), 400
+    if is_youtube_disabled(url):
+        return jsonify(error=YOUTUBE_DISABLED_MESSAGE), 400
 
     tmpdir = tempfile.mkdtemp(prefix="baixador_")
 
