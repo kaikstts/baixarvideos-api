@@ -331,7 +331,7 @@ class _DebugLogger:
 def analyze():
     data = request.get_json(force=True, silent=True) or {}
     url = (data.get("url") or "").strip()
-    debug = request.args.get("debug") == "1"
+    debug = bool(data.get("debug"))
 
     if not url:
         return jsonify(error="Cole um link antes de continuar."), 400
