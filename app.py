@@ -255,22 +255,26 @@ def base_ydl_opts() -> dict:
     if has_cookies:
         opts["cookiefile"] = _WRITABLE_COOKIES_FILE
 
-    # IMPORTANTE (2026-07-07, segunda descoberta): forçar player_client
-    # (mweb/android/ios) JUNTO com cookies reintroduz o mesmo problema já
-    # visto antes (misturar esses clients com cookies quebra a
-    # autenticação) — só que dessa vez o erro veio como "Sign in to
-    # confirm you're not a bot" em vez de "Requested format is not
-    # available". Confirmado ao vivo: com cookies frescos (reexportados
-    # nesta sessão) + esse override de client, o vídeo 4Sffn-6U0hY voltou a
-    # falhar com bot-check. A regra que funcionou antes (Passo 3, sessão
-    # anterior) era: com cookies, deixar o yt-dlp escolher o client padrão
-    # (não força nada); sem cookies, força android/ios/web. O PO Token
-    # Provider continua registrado sempre (não atrapalha), só o client
-    # forçado para mweb é que fica reservado para quando NÃO há cookies.
+    # TERCEIRA descoberta (2026-07-07, logs verbosos com debug=true): mesmo
+    # deixando o yt-dlp escolher o client "padrão" com cookies presentes, a
+    # versão atual do yt-dlp (2026.7.4) usa por padrão os clients
+    # "android_vr" e "web_safari" — nenhum dos dois consome cookies de conta
+    # da mesma forma que o client "web" tradicional, então os dois retornam
+    # "playability status: LOGIN_REQUIRED" mesmo com cookies frescos e
+    # válidos no cookiefile. Ou seja: em versões novas do yt-dlp, "deixar
+    # no automático" NÃO é mais equivalente a usar o client "web". Por isso
+    # agora forçamos explicitamente player_client=["web"] sempre que há
+    # cookies (esse client é o único com suporte completo e testado a
+    # cookies de conta real). Sem cookies, mantemos mweb (alvo oficial do
+    # PO Token) + android/ios/web como fallback. O PO Token Provider fica
+    # registrado nos dois casos (não atrapalha, e a equipe do yt-dlp
+    # recomenda tê-lo sempre disponível).
     extractor_args = {}
     if _POT_PROVIDER_BASE_URL:
         extractor_args["youtubepot-bgutilhttp"] = {"base_url": [_POT_PROVIDER_BASE_URL]}
-    if not has_cookies:
+    if has_cookies:
+        extractor_args["youtube"] = {"player_client": ["web"]}
+    else:
         extractor_args["youtube"] = {"player_client": ["mweb", "android", "ios", "web"]}
     if extractor_args:
         opts["extractor_args"] = extractor_args
